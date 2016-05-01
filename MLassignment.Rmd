@@ -1,0 +1,119 @@
+---
+title: "Machine Learning Programming Assignment"
+author: "Andreas Odenkirchen"
+date: "1. Mai 2016"
+output: html_document
+---
+
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use this document for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+## Predictive Analysis
+The analysis and prediction is performed in 5 steps.
+1. Data loading
+2. Data preparation
+3. Data subsampling
+4. Predictive modeling
+5. Prediction
+
+These steps are explained below together with the R code used to perform the analysis. 
+
+### 1. Load the data
+The data is loaded from the website and loaded into R. Thereby, missing and invalid values are labeled as NA to make the handling of the data during predictive modeling easier. 
+```{r}
+# load the data from the website
+# set the working directory to the path of the downloaded files
+setwd("C:/Users/de-85972/Desktop/Coursera/Data")
+# read the two csv files into R
+training = read.csv("./pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+testing = read.csv("./pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+
+```
+
+### 2. Data preparation
+We apply a few transformations to the data to cleanse it and prepare for predictive modeling.
+All transformations applied to the training set also need to applied to the testing set.
+```{r}
+# detect near-zero variablesusing the caret package
+library(caret)
+nzv <- nearZeroVar(training, saveMetrics=TRUE)
+
+# remove near-zero variables from training data
+trainingclean <- training[,nzv$nzv==FALSE]
+testingclean <- testing[,nzv$nzv==FALSE]
+
+# remove row ID, user names, timestamps and window number
+trainingclean <- trainingclean[,-(1:6)] 
+testingclean <- testingclean[,-(1:6)]
+
+# remove all variables with more than 50% NA's
+trainingclean <- trainingclean[,!(colSums(is.na(trainingclean)) > length(trainingclean$classe)*0.5)]
+testingclean <- testingclean[,!(colSums(is.na(testingclean)) > length(testingclean$classe)*0.5)]
+
+# impute missing data
+library(RANN)
+preObj <- preProcess(trainingclean, method="knnImpute")
+trainingclean <- predict(preObj, trainingclean)
+testingclean <- predict(preObj, testingclean)
+```
+
+### 3. Subsample the training data for cross-validation
+We split the training data into training and testing partitions again, so that we can evaluate model fit on some test data whithout overfitting the model to the actual testing data.
+```{r}
+set.seed(3875)
+inTrain <- createDataPartition(y=trainingclean$classe, p=0.6, list=FALSE)
+traindata <- trainingclean[inTrain,]
+testdata <- trainingclean[-inTrain,]
+```
+
+### 4. Predict "classe" using different algorithms
+
+First, we fit a classification tree using the rpart package in R.
+```{r}
+library(rpart)
+rpartmodel <- rpart(classe~., data=traindata, method="class")
+```
+
+The fitted tree can be plotted using the rpart.plot package in R. This helps to interpret the model and understand, which variables were used as predictors by the model.
+```{r}
+library(rpart.plot)
+rpart.plot(rpartmodel)
+```
+
+Now we can predict on the test data to evaluate the accuracy of the model.
+```{r}
+rpartpred <- predict(rpartmodel, testdata, type="class")
+confusionMatrix(rpartpred, testdata$classe)$overall['Accuracy']
+```
+
+The accuracy is 76.9 %, which means that the estimated out-of-sample error is 23.1%.
+
+
+To increase accuracy, let's try out the random forest algorithm.
+```{r}
+library(randomForest)
+rfmodel <- randomForest(classe~., data=traindata, method="rf")
+rfpred <- predict(rfmodel, testdata, type="class")
+confusionMatrix(rfpred, testdata$classe)$overall['Accuracy']
+```
+Using the random forest algorithm, we can increase accuracy to 99.6% and reduce the estimated out-of-sample error to only 0.4%. Hence, we decide to use this model to predict the actual test data.
+
+
+### 5. Prediction using the actual testing data
+We can apply the random forest model to the actual testing data (which was prepared the same way as the training data) and produce predictions for the classer variable.
+```{r}
+predict(rfmodel, testingclean, type="class")
+```
+
+These predictions will be submitted to the test quiz to check whether the model classified the 20 testing observations correctly.
+
+
